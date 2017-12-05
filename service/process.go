@@ -34,7 +34,7 @@ func (this *service) processor() {
 	defer func() {
 		// Let's recover from panic
 		if r := recover(); r != nil {
-			//glog.Errorf("(%s) Recovering from panic: %v", this.cid(), r)
+			glog.Errorf("(%s) Recovering from panic: %v", this.cid(), r)
 		}
 
 		this.wgStopped.Done()
@@ -316,6 +316,7 @@ func (this *service) processSubscribe(msg *message.SubscribeMessage) error {
 		if err != nil {
 			return err
 		}
+		this.server.incSub(string(t))
 		this.sess.AddTopic(string(t), qos[i])
 
 		retcodes = append(retcodes, rqos)

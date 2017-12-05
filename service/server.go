@@ -46,6 +46,7 @@ const (
 	DefaultSessionsProvider = "mem"
 	DefaultAuthenticator    = "mockSuccess"
 	DefaultTopicsProvider   = "mem"
+	DefaultTopicSubChanLen  = 1000
 )
 
 // Server is a library implementation of the MQTT server that, as best it can, complies
@@ -80,6 +81,9 @@ type Server struct {
 	// If not set then default to "mem".
 	TopicsProvider string
 
+	// TopicSubChanLen sub num chan, default 1000
+	TopicSubChanLen int
+
 	// authMgr is the authentication manager that we are going to use for authenticating
 	// incoming connections
 	authMgr *auth.Manager
@@ -111,6 +115,54 @@ type Server struct {
 
 	subs []interface{}
 	qoss []byte
+
+	//Mutex for topic subs num map
+	topicMutex sync.Mutex
+
+	//inc sub chan
+	topicIncChan chan string
+	topicDecChan chan string
+
+	//topic subs num map
+	topicSubs map[string]int64
+}
+
+func (this *Server) incSub(topic string) {
+	//glog.Infof("inc sub:%s", topic)
+	//this.topicMutex.Lock()
+	//defer this.topicMutex.Unlock()
+	//this.topicSubs[topic] += 1
+	select {
+	case this.topicIncChan <- topic:
+	default:
+		glog.Warningf("full of inc topic chan")
+	}
+}
+
+func (this *Server) decSub(topic string) {
+	//glog.Infof("dec sub:%s", topic)
+	//this.topicMutex.Lock()
+	//defer this.topicMutex.Unlock()
+	//if this.topicSubs[topic] > 0 {
+	//	this.topicSubs[topic] -= 1
+	//}
+	select {
+	case this.topicDecChan <- topic:
+	default:
+		glog.Warningf("full of dec topic chan")
+	}
+}
+
+func (this *Server) GetTopicSubs() map[string]int64 {
+	return this.topicSubs
+}
+
+func (this *Server) GetTopicIncChan() chan string {
+	return this.topicIncChan
+}
+
+func (this *Server) GetTopicDecChan() chan string {
+	return this.topicDecChan
 }
 
 // ListenAndServe listents to connections on the URI requested, and handles any
@@ -119,6 +171,10 @@ type Server struct {
 // supplied should be of the form "protocol://host:port" that can be parsed by
 // url.Parse(). For example, an URI could be "tcp://0.0.0.0:1883".
 func (this *Server) ListenAndServe(uri string) error {
+	//init topicSubs TODO
+	this.topicSubs = make(map[string]int64)
+	this.topicIncChan = make(chan string, this.TopicSubChanLen)
+	this.topicDecChan = make(chan string, this.TopicSubChanLen)
 	defer atomic.CompareAndSwapInt32(&this.running, 1, 0)
 
 	if !atomic.CompareAndSwapInt32(&this.running, 0, 1) {
@@ -313,6 +369,8 @@ func (this *Server) handleConnection(c io.Closer) (svc *service, err error) {
 		conn:      conn,
 		sessMgr:   this.sessMgr,
 		topicsMgr: this.topicsMgr,
+
+		server: this,
 	}
 
 	err = this.getSession(svc, req, resp)
@@ -383,6 +441,10 @@ func (this *Server) checkConfiguration() error {
 
 		if this.TopicsProvider == "" {
 			this.TopicsProvider = "mem"
+		}
+
+		if this.TopicSubChanLen == 0 {
+			this.TopicSubChanLen = DefaultTopicSubChanLen
 		}
 
 		this.topicsMgr, err = topics.NewManager(this.TopicsProvider)

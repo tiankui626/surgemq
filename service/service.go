@@ -121,6 +121,8 @@ type service struct {
 	subs  []interface{}
 	qoss  []byte
 	rmsgs []*message.PublishMessage
+
+	server *Server
 }
 
 func (this *service) start() error {
@@ -157,6 +159,7 @@ func (this *service) start() error {
 		} else {
 			for i, t := range topics {
 				this.topicsMgr.Subscribe([]byte(t), qoss[i], &this.onpub)
+				this.server.incSub(t)
 			}
 		}
 	}
@@ -230,6 +233,7 @@ func (this *service) stop() {
 				if err := this.topicsMgr.Unsubscribe([]byte(t), &this.onpub); err != nil {
 					glog.Errorf("(%s): Error unsubscribing topic %q: %v", this.cid(), t, err)
 				}
+				this.server.decSub(t)
 			}
 		}
 	}
